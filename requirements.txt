@@ -1,0 +1,9 @@
+fastapi
+uvicorn
+python-multipart
+boto3
+requests
+pytest
+pytest-pythonpath
+pytest-cov
+aioboto3
