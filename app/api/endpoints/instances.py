@@ -30,7 +30,9 @@ async def api_create_instance(
         ec2_client,
         instance_req.ami_id,
         instance_req.min_count,
-        instance_req.max_count
+        instance_req.max_count,
+        instance_req.create_key_pair,
+        instance_req.key_name
     )
     # Return the response data conforming to the InstanceResponse model.
     return InstanceResponse(instance_ids=instance_ids, status="running")
