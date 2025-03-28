@@ -67,4 +67,34 @@ async def authorize_ingress(
         logging.exception("An unexpected error occurred:")
         raise HTTPException(status_code=500, detail="Unexpected error")
 
+async def attach_security_group(
+    ec2_client,
+    group_id: str,
+    instance_id: str
+):
+    try:
+        # Retrieve current security groups for the instance
+        response = await ec2_client.describe_instances(InstanceIds=[instance_id])
+        instance = response['Reservations'][0]['Instances'][0]
+        current_sg_ids = [sg['GroupId'] for sg in instance['SecurityGroups']]
+        
+        if group_id not in current_sg_ids:
+            current_sg_ids.append(group_id)
+            
+        response = await ec2_client.modify_instance_attribute(
+            InstanceId=instance_id,
+            Groups=current_sg_ids           
+        )
+        return response
+    # --- Error Handling ---
+    except NoCredentialsError:
+        logging.exception("Error: AWS credentials not found or are invalid.")
+        raise HTTPException(status_code=400, detail="AWS credentials error")
+    except ClientError:
+        logging.exception("A client error occurred:")
+        raise HTTPException(status_code=400, detail="AWS client error")
+    except Exception as e:
+        logging.exception("An unexpected error occurred:")
+        raise HTTPException(status_code=500, detail="Unexpected error")
+    
     

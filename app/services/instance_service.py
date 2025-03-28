@@ -2,8 +2,8 @@ import logging
 from fastapi import HTTPException 
 from botocore.exceptions import ClientError, NoCredentialsError
 import aioboto3  
-from .security_group_service import create_security_group, authorize_ingress 
-
+from .security_group_service import create_security_group, authorize_ingress, attach_security_group
+from app.config.config import FEATURE_SECURITY_GROUPS
 
 # Configure logging for the integration test.
 logging.basicConfig(
@@ -18,10 +18,10 @@ logging.basicConfig(
 # Utility function to create a key pair if it doesn't already exist.
 # This function is asynchronous because it awaits calls to the AWS API.
 async def create_keypair(ec2_client, key_name):
-    # Await the describe_key_pairs call to get existing key pairs.
-    key_pairs_response = await ec2_client.describe_key_pairs()
+
     # Extract the key names from the returned list of key pair dictionaries.
     # The response is expected to have a "KeyPairs" key containing a list of dicts.
+    key_pairs_response = await ec2_client.describe_key_pairs()
     existing_keys = [kp['KeyName'] for kp in key_pairs_response.get('KeyPairs', [])]
     
     # Check if the desired key pair does not already exist.
@@ -58,7 +58,7 @@ async def create_instance(
     max_count: int, 
     create_key_pair: bool, 
     key_name: str,
-    create_security_group: bool,
+    create_sg: bool,
     security_group_name: str,
     security_group_description: str,
     security_group_rules                          
@@ -78,7 +78,7 @@ async def create_instance(
             "InstanceType": 't2.micro'
         }
         
-        if create_security_group:
+        if FEATURE_SECURITY_GROUPS and create_sg:
             group_id = await create_security_group(
                                 ec2_client, 
                                 security_group_name, 
@@ -90,6 +90,7 @@ async def create_instance(
                 ip_permission = {
                     "IpProtocol": rule.ip_protocol,
                     "FromPort": rule.from_port,
+                    "ToPort": rule.to_port,
                     "IpRanges": ip_ranges,
                 }
                 ip_permissions.append(ip_permission)
@@ -98,12 +99,13 @@ async def create_instance(
                 group_id=group_id,
                 ip_permissions=ip_permissions
             )
+
             
         
         # --- Key Pair Creation Block ---
         if create_key_pair:
             # IMPORTANT: Await the create_keypair utility function so it completes before proceeding.
-            key_name = await create_keypair(ec2_client,)
+            key_name = await create_keypair(ec2_client, key_name)
             params["KeyName"] = key_name
             
         # --- EC2 Instance Creation Block ---
@@ -114,6 +116,9 @@ async def create_instance(
         # Extract the instance IDs from the response.
         # Loop over the list of instances in the response.
         instance_ids = [instance.get('InstanceId') for instance in new_instances['Instances']]
+        if FEATURE_SECURITY_GROUPS and create_sg:
+            for instance_id in instance_ids:
+                await attach_security_group(ec2_client, group_id=group_id, instance_id=instance_id)
         
         # Get a waiter object to check when the instances reach the 'running' state.
         waiter = ec2_client.get_waiter('instance_running')
