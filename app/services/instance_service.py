@@ -1,14 +1,8 @@
-# Importing the logging module to record events and errors.
 import logging
-
-# Importing HTTPException from FastAPI to raise HTTP errors in a web context.
-from fastapi import HTTPException # type: ignore
-
-# Importing specific exceptions from botocore to handle AWS-related errors.
+from fastapi import HTTPException 
 from botocore.exceptions import ClientError, NoCredentialsError
-
-# Importing aioboto3 for asynchronous AWS SDK functionality.
-import aioboto3  # type: ignore
+import aioboto3  
+from .security_group_service import create_security_group, authorize_ingress 
 
 
 # Configure logging for the integration test.
@@ -57,7 +51,18 @@ async def create_keypair(ec2_client, key_name):
 # Define an asynchronous function to create EC2 instances.
 # The function takes an AWS EC2 client, an AMI ID, the minimum and maximum number of instances,
 # a flag to indicate if a key pair should be created, and the key pair name.
-async def create_instance(ec2_client, ami_id: str, min_count: int, max_count: int, create_key_pair: bool, key_name: str) -> list[str]:
+async def create_instance(
+    ec2_client, 
+    ami_id: str, 
+    min_count: int, 
+    max_count: int, 
+    create_key_pair: bool, 
+    key_name: str,
+    create_security_group: bool,
+    security_group_name: str,
+    security_group_description: str,
+    security_group_rules                          
+) -> list[str]:
     try:
         # Log that the instance creation process is starting.
         logging.info("Initiating instance creation asynchronously.")
@@ -73,10 +78,32 @@ async def create_instance(ec2_client, ami_id: str, min_count: int, max_count: in
             "InstanceType": 't2.micro'
         }
         
+        if create_security_group:
+            group_id = await create_security_group(
+                                ec2_client, 
+                                security_group_name, 
+                                security_group_description
+            )
+            ip_permissions = []
+            for rule in security_group_rules:
+                ip_ranges = [{"CidrIp": ip} for ip in rule.ip_ranges] if rule.ip_ranges else []
+                ip_permission = {
+                    "IpProtocol": rule.ip_protocol,
+                    "FromPort": rule.from_port,
+                    "IpRanges": ip_ranges,
+                }
+                ip_permissions.append(ip_permission)
+            await authorize_ingress(
+                ec2_client,
+                group_id=group_id,
+                ip_permissions=ip_permissions
+            )
+            
+        
         # --- Key Pair Creation Block ---
         if create_key_pair:
             # IMPORTANT: Await the create_keypair utility function so it completes before proceeding.
-            key_name = await create_keypair(ec2_client, key_name)
+            key_name = await create_keypair(ec2_client,)
             params["KeyName"] = key_name
             
         # --- EC2 Instance Creation Block ---

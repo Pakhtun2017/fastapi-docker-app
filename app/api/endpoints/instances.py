@@ -1,10 +1,9 @@
-# app/api/endpoints/instances.py
-from fastapi import APIRouter, Depends # type: ignore
+from fastapi import APIRouter, Depends 
 from app.models.instance_models import InstanceRequest, InstanceResponse, TerminateRequest
 from app.services import instance_service
 from app.dependencies import get_ec2_client
 import logging
-import aioboto3 # type: ignore
+import aioboto3 
 
 # Configure logging for the integration test.
 logging.basicConfig(
@@ -32,7 +31,11 @@ async def api_create_instance(
         instance_req.min_count,
         instance_req.max_count,
         instance_req.create_key_pair,
-        instance_req.key_name
+        instance_req.key_name,
+        instance_req.create_security_group,
+        instance_req.security_group_name,
+        instance_req.security_group_description,
+        instance_req.security_group_rules
     )
     # Return the response data conforming to the InstanceResponse model.
     return InstanceResponse(instance_ids=instance_ids, status="running")

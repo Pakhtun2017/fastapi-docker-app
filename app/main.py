@@ -1,5 +1,5 @@
 from fastapi import FastAPI # type: ignore
-from app.api.endpoints import instances  # Import the router from your endpoints module
+from app.api.endpoints import instances  
 
 # Create the FastAPI application instance.
 app = FastAPI()
