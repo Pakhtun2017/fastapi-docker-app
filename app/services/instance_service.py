@@ -3,6 +3,7 @@ from fastapi import HTTPException
 from botocore.exceptions import ClientError, NoCredentialsError
 import aioboto3  
 from .security_group_service import create_security_group, authorize_ingress, attach_security_group
+from .key_pair_service import create_keypair
 from app.config.config import FEATURE_SECURITY_GROUPS
 
 # Configure logging for the integration test.
@@ -14,38 +15,6 @@ logging.basicConfig(
         logging.StreamHandler()
     ]
 )
-
-# Utility function to create a key pair if it doesn't already exist.
-# This function is asynchronous because it awaits calls to the AWS API.
-async def create_keypair(ec2_client, key_name):
-
-    # Extract the key names from the returned list of key pair dictionaries.
-    # The response is expected to have a "KeyPairs" key containing a list of dicts.
-    key_pairs_response = await ec2_client.describe_key_pairs()
-    existing_keys = [kp['KeyName'] for kp in key_pairs_response.get('KeyPairs', [])]
-    
-    # Check if the desired key pair does not already exist.
-    if key_name not in existing_keys:
-        # Create a new key pair if it doesn't exist.
-        key_response = await ec2_client.create_key_pair(KeyName=key_name)
-        # Extract the private key material from the response.
-        key_material = key_response.get('KeyMaterial')
-        # Save the private key to a file. This file operation is synchronous.
-        filename = f"{key_name}.pem"
-        with open(filename, "w") as key_file:
-            key_file.write(key_material)
-        # Change file permissions to read-only for security.
-        import os
-        os.chmod(filename, 0o400)
-        # Return the key name as confirmation that it was created.
-        return key_name
-        # NOTE: The following logging statement will never be reached because it's after the return.
-        logging.info(f"Created and saved key pair: {key_name}")
-    else:
-        # Log that the key pair already exists.
-        logging.info(f"Key pair '{key_name}' already exists; reusing it.")
-        # Consider returning the key_name here as well if needed.
-        return key_name
 
 
 # Define an asynchronous function to create EC2 instances.
@@ -68,9 +37,6 @@ async def create_instance(
         logging.info("Initiating instance creation asynchronously.")
 
         # --- EC2 Instance Creation Block ---
-        # When calling run_instances, AWS expects a dictionary without parameters that have None values.
-        # Passing KeyName=None might cause AWS to reject the request.
-        # Instead, only include KeyName if create_key_pair is True and key_name is a valid string.
         params = {
             "ImageId": ami_id,
             "MinCount": min_count or 1,
@@ -79,6 +45,7 @@ async def create_instance(
         }
         
         if FEATURE_SECURITY_GROUPS and create_sg:
+            logging.info("Creating security group")
             group_id = await create_security_group(
                                 ec2_client, 
                                 security_group_name, 
@@ -94,13 +61,12 @@ async def create_instance(
                     "IpRanges": ip_ranges,
                 }
                 ip_permissions.append(ip_permission)
+            logging.info(f"Invoking authorize_ingress and passing these ip_permissions - {ip_permissions}")
             await authorize_ingress(
                 ec2_client,
                 group_id=group_id,
                 ip_permissions=ip_permissions
             )
-
-            
         
         # --- Key Pair Creation Block ---
         if create_key_pair:
@@ -109,8 +75,7 @@ async def create_instance(
             params["KeyName"] = key_name
             
         # --- EC2 Instance Creation Block ---
-        # Call run_instances with the required parameters.
-        # Note: AWS expects the parameter for the key pair to be 'KeyName' (capital K and N).
+        logging.info("Creating the EC2 instance")
         new_instances = await ec2_client.run_instances(**params)
         
         # Extract the instance IDs from the response.
@@ -118,6 +83,7 @@ async def create_instance(
         instance_ids = [instance.get('InstanceId') for instance in new_instances['Instances']]
         if FEATURE_SECURITY_GROUPS and create_sg:
             for instance_id in instance_ids:
+                logging.info("Attaching security group to the instance")
                 await attach_security_group(ec2_client, group_id=group_id, instance_id=instance_id)
         
         # Get a waiter object to check when the instances reach the 'running' state.
