@@ -29,5 +29,6 @@ class InstanceResponse(BaseModel):
     instance_ids: list[str]
     status: str
 
+
 class TerminateRequest(BaseModel):
     instance_ids: list[str]

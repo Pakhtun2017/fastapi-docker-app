@@ -6,7 +6,7 @@ from .security_group_service import create_security_group, authorize_ingress, at
 from .key_pair_service import create_keypair
 from app.config.config import FEATURE_SECURITY_GROUPS
 
-# Configure logging for the integration test.
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(filename)s:%(funcName)s: %(message)s",
@@ -16,10 +16,6 @@ logging.basicConfig(
     ]
 )
 
-
-# Define an asynchronous function to create EC2 instances.
-# The function takes an AWS EC2 client, an AMI ID, the minimum and maximum number of instances,
-# a flag to indicate if a key pair should be created, and the key pair name.
 async def create_instance(
     ec2_client, 
     ami_id: str, 
@@ -32,18 +28,39 @@ async def create_instance(
     security_group_description: str,
     security_group_rules                          
 ) -> list[str]:
-    try:
-        # Log that the instance creation process is starting.
-        logging.info("Initiating instance creation asynchronously.")
+    """
+    Asynchronously creates one or more EC2 instances with optional configurations for security groups and key pairs.
+    Args:
+        ec2_client: The boto3 EC2 client object used to interact with AWS EC2.
+        ami_id (str): The ID of the Amazon Machine Image (AMI) to use for the instance(s).
+        min_count (int): The minimum number of instances to launch. Defaults to 1 if not provided.
+        max_count (int): The maximum number of instances to launch. Defaults to 1 if not provided.
+        create_key_pair (bool): Whether to create a new key pair for the instance(s).
+        key_name (str): The name of the key pair to create or use.
+        create_sg (bool): Whether to create a new security group for the instance(s).
+        security_group_name (str): The name of the security group to create.
+        security_group_description (str): A description for the security group.
+        security_group_rules: A list of rules to apply to the security group. Each rule should include:
+            - ip_protocol (str): The IP protocol (e.g., 'tcp', 'udp', 'icmp').
+            - from_port (int): The starting port for the rule.
+            - to_port (int): The ending port for the rule.
+            - ip_ranges (list[str]): A list of CIDR IP ranges to allow.
+    Returns:
+        list[str]: A list of instance IDs for the created EC2 instances.
+    Raises:
+        HTTPException: If AWS credentials are missing or invalid, a client error occurs, or an unexpected error occurs.
+    """
 
-        # --- EC2 Instance Creation Block ---
+    try:
+        
         params = {
             "ImageId": ami_id,
             "MinCount": min_count or 1,
             "MaxCount": max_count or 1,
             "InstanceType": 't2.micro'
         }
-        
+
+        # --- Security Group Creation Block ---
         if FEATURE_SECURITY_GROUPS and create_sg:
             logging.info("Creating security group")
             group_id = await create_security_group(
@@ -51,6 +68,7 @@ async def create_instance(
                                 security_group_name, 
                                 security_group_description
             )
+
             ip_permissions = []
             for rule in security_group_rules:
                 ip_ranges = [{"CidrIp": ip} for ip in rule.ip_ranges] if rule.ip_ranges else []
@@ -61,7 +79,7 @@ async def create_instance(
                     "IpRanges": ip_ranges,
                 }
                 ip_permissions.append(ip_permission)
-            logging.info(f"Invoking authorize_ingress and passing these ip_permissions - {ip_permissions}")
+
             await authorize_ingress(
                 ec2_client,
                 group_id=group_id,
@@ -70,7 +88,6 @@ async def create_instance(
         
         # --- Key Pair Creation Block ---
         if create_key_pair:
-            # IMPORTANT: Await the create_keypair utility function so it completes before proceeding.
             key_name = await create_keypair(ec2_client, key_name)
             params["KeyName"] = key_name
             
@@ -80,7 +97,10 @@ async def create_instance(
         
         # Extract the instance IDs from the response.
         # Loop over the list of instances in the response.
-        instance_ids = [instance.get('InstanceId') for instance in new_instances['Instances']]
+        instance_ids = [
+            instance.get('InstanceId') 
+            for instance in new_instances['Instances']
+        ]
         if FEATURE_SECURITY_GROUPS and create_sg:
             for instance_id in instance_ids:
                 logging.info("Attaching security group to the instance")
@@ -109,6 +129,21 @@ async def create_instance(
 
 
 async def terminate_instance(ec2_client, instance_ids: list[str]) -> list[str]:
+    """
+    Asynchronously terminates a list of EC2 instances using the provided EC2 client.
+    This function uses aioboto3 to terminate the specified EC2 instances and waits
+    for their termination to complete. It handles various exceptions related to AWS
+    credentials, client errors, and unexpected issues.
+    Args:
+        ec2_client: An aioboto3 EC2 client instance used to interact with AWS EC2.
+        instance_ids (list[str]): A list of EC2 instance IDs to be terminated.
+    Returns:
+        list[str]: A list of successfully terminated instance IDs.
+    Raises:
+        HTTPException: If AWS credentials are invalid or missing, or if an AWS client
+                       error or unexpected error occurs.
+    """
+    
     try:
         logging.info(f"Initiating asynchronous termination for instances: {instance_ids}")
         # Terminate instances asynchronously using aioboto3
